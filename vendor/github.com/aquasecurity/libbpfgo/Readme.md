@@ -2,6 +2,10 @@
 
 <img src="docs/images/aqua-tux.png" width="150" height="auto">
 
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/aquasecurity/libbpfgo)](https://github.com/aquasecurity/libbpfgo/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/aquasecurity/libbpfgo)](https://goreportcard.com/report/github.com/aquasecurity/libbpfgo)
+[![License](https://img.shields.io/github/license/aquasecurity/libbpfgo)](https://github.com/aquasecurity/libbpfgo/blob/main/LICENSE)
+
 ----
 
 * [Installing](#installing)
@@ -33,6 +37,7 @@ Currently you will find the following GNU Makefile rules:
 | clean                    | cleans entire tree                |
 | selftest                 | builds all selftests (static)     |
 | selftest-run             | runs all selftests (static)       |
+| helpers-test-run         | runs all helpers tests (static)   |
 
 * libbpf dynamically linked (libbpf from OS)
 
@@ -42,6 +47,7 @@ Currently you will find the following GNU Makefile rules:
 | libbpfgo-dynamic-test    | 'go test' with dynamic libbpfgo   |
 | selftest-dynamic         | build tests with dynamic libbpfgo |
 | selftest-dynamic-run     | run tests using dynamic libbpfgo  |
+| helpers-test-dynamic-run | run helpers package unit tests using dynamic libbpfgo  |
 
 * statically compiled (libbpf submodule)
 
@@ -51,6 +57,7 @@ Currently you will find the following GNU Makefile rules:
 | libbpfgo-static-test     | 'go test' with static libbpfgo    |
 | selftest-static          | build tests with static libbpfgo  |
 | selftest-static-run      | run tests using static libbpfgo   |
+| helpers-test-static-run  | run helpers package unit tests using static libbpfgo   |
 
 * examples
 
@@ -114,5 +121,5 @@ Please check our github milestones for an idea of the project roadmap. The gener
 
 - [How to Build eBPF Programs with libbpfgo](https://blog.aquasec.com/libbpf-ebpf-programs).
 - [selftests](./selftest) are small program using libbpfgo and might be good usage examples.
-- [tracee-ebpf](https://github.com/aquasecurity/tracee/tree/main/tracee-ebpf) is a robust consumer of this project.
+- [tracee-ebpf](https://github.com/aquasecurity/tracee/tree/main/cmd/tracee-ebpf) is a robust consumer of this project.
 - Feel free to ask questions by creating a new [Discussion](https://github.com/aquasecurity/libbpfgo/discussions), we'd love to help.
