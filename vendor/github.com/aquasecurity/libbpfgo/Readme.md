@@ -2,6 +2,10 @@
 
 <img src="docs/images/aqua-tux.png" width="150" height="auto">
 
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/aquasecurity/libbpfgo)](https://github.com/aquasecurity/libbpfgo/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/aquasecurity/libbpfgo)](https://goreportcard.com/report/github.com/aquasecurity/libbpfgo)
+[![License](https://img.shields.io/github/license/aquasecurity/libbpfgo)](https://github.com/aquasecurity/libbpfgo/blob/main/LICENSE)
+
 ----
 
 * [Installing](#installing)
@@ -33,6 +37,7 @@ Currently you will find the following GNU Makefile rules:
 | clean                    | cleans entire tree                |
 | selftest                 | builds all selftests (static)     |
 | selftest-run             | runs all selftests (static)       |
+| helpers-test-run         | runs all helpers tests (static)   |
 
 * libbpf dynamically linked (libbpf from OS)
 
@@ -42,6 +47,7 @@ Currently you will find the following GNU Makefile rules:
 | libbpfgo-dynamic-test    | 'go test' with dynamic libbpfgo   |
 | selftest-dynamic         | build tests with dynamic libbpfgo |
 | selftest-dynamic-run     | run tests using dynamic libbpfgo  |
+| helpers-test-dynamic-run | run helpers package unit tests using dynamic libbpfgo  |
 
 * statically compiled (libbpf submodule)
 
@@ -51,6 +57,7 @@ Currently you will find the following GNU Makefile rules:
 | libbpfgo-static-test     | 'go test' with static libbpfgo    |
 | selftest-static          | build tests with static libbpfgo  |
 | selftest-static-run      | run tests using static libbpfgo   |
+| helpers-test-static-run  | run helpers package unit tests using static libbpfgo   |
 
 * examples
 
@@ -107,6 +114,20 @@ libbpfgo does not yet have a regular schedule for cutting releases. There has no
 
 *Note*: some distributions might have local changes to their libbpf package and their version might include backports and/or fixes differently than upstream versions. In those cases we recommend that libbpfgo is used statically compiled.
 
+## Contributing
+
+To better receive you, libbpfgo makes available GNU Makefile rules for vagrant machines (amd64/arm64) that can be used to compile and test on Linux and Darwin hosts:
+
+| Makefile Rule     | Description                                         |
+|-------------------|-----------------------------------------------------|
+| vagrant-up        | starts and provisions the vagrant environment       |
+| vagrant-ssh       | connects to machine via SSH                         |
+| vagrant-halt      | stops the vagrant machine                           |
+| vagrant-destroy   | stops and deletes all traces of the vagrant machine |
+
+Once connected to the vagrant box you are ready to [build](#building) libbpfgo (e.g. `make libbpfgo-static`).
+
+For further information, check [Vagrantfile.md](./docs/Vagrantfile.md).
 
 ## Learn more
 
@@ -114,5 +135,5 @@ Please check our github milestones for an idea of the project roadmap. The gener
 
 - [How to Build eBPF Programs with libbpfgo](https://blog.aquasec.com/libbpf-ebpf-programs).
 - [selftests](./selftest) are small program using libbpfgo and might be good usage examples.
-- [tracee-ebpf](https://github.com/aquasecurity/tracee/tree/main/tracee-ebpf) is a robust consumer of this project.
+- [tracee-ebpf](https://github.com/aquasecurity/tracee/tree/main/cmd/tracee-ebpf) is a robust consumer of this project.
 - Feel free to ask questions by creating a new [Discussion](https://github.com/aquasecurity/libbpfgo/discussions), we'd love to help.
