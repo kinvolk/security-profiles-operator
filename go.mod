@@ -8,8 +8,8 @@ require (
 	github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1
 	github.com/containers/common v0.46.0
 	github.com/crossplane/crossplane-runtime v0.14.1-0.20210713194031-85b19c28ea88
-	github.com/go-logr/logr v1.2.2
-	github.com/maxbrunsfeld/counterfeiter/v6 v6.4.1
+	github.com/go-logr/logr v1.2.3
+	github.com/maxbrunsfeld/counterfeiter/v6 v6.6.1
 	github.com/nxadm/tail v1.4.8
 	github.com/pjbgf/go-apparmor v0.0.7
 	github.com/pkg/errors v0.9.1
@@ -21,8 +21,7 @@ require (
 	github.com/urfave/cli/v2 v2.3.0
 	google.golang.org/grpc v1.44.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
-	google.golang.org/protobuf v1.27.1
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+	google.golang.org/protobuf v1.28.0
 	k8s.io/api v0.23.3
 	k8s.io/apimachinery v0.23.3
 	k8s.io/client-go v0.23.3
