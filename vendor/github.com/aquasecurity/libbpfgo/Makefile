@@ -1,18 +1,23 @@
+
+.ONESHELL:
+SHELL = /bin/bash
+
 BASEDIR = $(abspath ./)
 
 OUTPUT = ./output
 SELFTEST = ./selftest
+HELPERS = ./helpers
 
 CC = gcc
 CLANG = clang
-
-ARCH := $(shell uname -m)
-ARCH := $(subst x86_64,amd64,$(ARCH))
-
-BTFFILE = /sys/kernel/btf/vmlinux
-BPFTOOL = $(shell which bpftool || /bin/false)
+GO = go
+VAGRANT = vagrant
+CLANG_FMT = clang-format
 GIT = $(shell which git || /bin/false)
-VMLINUXH = $(OUTPUT)/vmlinux.h
+
+HOSTOS = $(shell uname)
+ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/g; s/aarch64/arm64/g')
+
 
 # libbpf
 
@@ -30,13 +35,23 @@ CGO_CFLAGS_STATIC = "-I$(abspath $(OUTPUT))"
 CGO_LDFLAGS_STATIC = "-lelf -lz $(LIBBPF_OBJ)"
 CGO_EXTLDFLAGS_STATIC = '-w -extldflags "-static"'
 
-CGO_CFGLAGS_DYN = "-I. -I/usr/include/"
+CGO_CFLAGS_DYN = "-I. -I/usr/include/"
 CGO_LDFLAGS_DYN = "-lelf -lz -lbpf"
 
 # default == shared lib from OS package
 
-all: libbpfgo-dynamic
-test: libbpfgo-dynamic-test
+all: libbpfgo-static
+test: libbpfgo-static-test
+
+# libbpf uapi
+
+.PHONY: libbpf-uapi
+
+libbpf-uapi: $(LIBBPF_SRC)
+# UAPI headers can be installed by a different package so they're not installed
+# in by (libbpf) install rule.
+	UAPIDIR=$(LIBBPF_DESTDIR) \
+		$(MAKE) -C $(LIBBPF_SRC) install_uapi_headers
 
 # libbpfgo test object
 
@@ -55,22 +70,22 @@ libbpfgo-dynamic: $(OUTPUT)/libbpf
 	CC=$(CLANG) \
 		CGO_CFLAGS=$(CGO_CFLAGS_DYN) \
 		CGO_LDFLAGS=$(CGO_LDFLAGS_DYN) \
-		go build .
+		$(GO) build .
 
 libbpfgo-dynamic-test: libbpfgo-test-bpf-dynamic
 	CC=$(CLANG) \
 		CGO_CFLAGS=$(CGO_CFLAGS_DYN) \
 		CGO_LDFLAGS=$(CGO_LDFLAGS_DYN) \
-		sudo -E go test .
+		sudo -E $(GO) test .
 
 # libbpf: static
 
-libbpfgo-static: $(VMLINUXH) | $(LIBBPF_OBJ)
+libbpfgo-static: libbpf-uapi $(LIBBPF_OBJ) 
 	CC=$(CLANG) \
 		CGO_CFLAGS=$(CGO_CFLAGS_STATIC) \
 		CGO_LDFLAGS=$(CGO_LDFLAGS_STATIC) \
 		GOOS=linux GOARCH=$(ARCH) \
-		go build \
+		$(GO) build \
 		-tags netgo -ldflags $(CGO_EXTLDFLAGS_STATIC) \
 		.
 
@@ -80,28 +95,9 @@ libbpfgo-static-test: libbpfgo-test-bpf-static
 		CGO_CFLAGS=$(CGO_CFLAGS_STATIC) \
 		CGO_LDFLAGS=$(CGO_LDFLAGS_STATIC) \
 		GOOS=linux GOARCH=$(ARCH) \
-		go test \
+		$(GO) test \
 		-v -tags netgo -ldflags $(CGO_EXTLDFLAGS_STATIC) \
 		.
-
-# vmlinux header file
-
-.PHONY: vmlinuxh
-vmlinuxh: $(VMLINUXH)
-
-$(VMLINUXH): $(OUTPUT)
-	@if [ ! -f $(BTFFILE) ]; then \
-		echo "ERROR: kernel does not seem to support BTF"; \
-		exit 1; \
-	fi
-	@if [ ! -f $(VMLINUXH) ]; then \
-		if [ ! $(BPFTOOL) ]; then \
-			echo "ERROR: could not find bpftool"; \
-			exit 1; \
-		fi; \
-		echo "INFO: generating $(VMLINUXH) from $(BTFFILE)"; \
-		$(BPFTOOL) btf dump file $(BTFFILE) format c > $(VMLINUXH); \
-	fi
 
 # static libbpf generation for the git submodule
 
@@ -130,7 +126,7 @@ define FOREACH
 	SELFTESTERR=0; \
 	for DIR in $(SELFTESTS); do \
 	      echo "INFO: entering $$DIR..."; \
-		$(MAKE) -j8 -C $$DIR $(1) || SELFTESTERR=1; \
+		$(MAKE) -j1 -C $$DIR $(1) || SELFTESTERR=1; \
 	done; \
 	if [ $$SELFTESTERR -eq 1 ]; then \
 		exit 1; \
@@ -161,6 +157,71 @@ selftest-dynamic-run:
 
 selftest-clean:
 	$(call FOREACH, clean)
+
+# helpers test
+
+.PHONY: helpers-test-run
+.PHONY: helpers-test-static-run
+.PHONY: helpers-test-dynamic-run
+
+helpers-test-run: helpers-test-static-run
+
+helpers-test-static-run: libbpfgo-static
+	CC=$(CLANG) \
+		CGO_CFLAGS=$(CGO_CFLAGS_STATIC) \
+		CGO_LDFLAGS=$(CGO_LDFLAGS_STATIC) \
+		sudo -E env PATH=$(PATH) $(GO) test -v $(HELPERS)/...
+
+helpers-test-dynamic-run: libbpfgo-dynamic
+	sudo $(GO) test -v $(HELPERS)/...
+
+# vagrant
+
+VAGRANT_DIR = $(abspath ./builder)
+
+.PHONY: vagrant-up
+.PHONY: vagrant-destroy
+.PHONY: vagrant-halt
+.PHONY: vagrant-ssh
+
+vagrant-up: .vagrant-up
+vagrant-destroy: .vagrant-destroy
+vagrant-halt: .vagrant-halt
+vagrant-ssh: .vagrant-ssh
+
+.vagrant-%:
+	VAGRANT_VAGRANTFILE=$(VAGRANT_DIR)/Vagrantfile-ubuntu \
+		ARCH=$(ARCH) \
+		HOSTOS=$(HOSTOS) \
+		$(VAGRANT) $*
+
+# fmt-check
+
+fmt-check:
+	@errors=0
+	echo "Checking C and eBPF files and headers formatting..."
+	$(CLANG_FMT) --dry-run -i ./libbpfgo.h > /tmp/check-c-fmt 2>&1
+	clangfmtamount=$$(cat /tmp/check-c-fmt | wc -l)
+	if [[ $$clangfmtamount -ne 0 ]]; then
+		head -n30 /tmp/check-c-fmt
+		errors=1
+	fi
+	rm -f /tmp/check-c-fmt
+#
+	if [[ $$errors -ne 0 ]]; then
+		echo
+		echo "Please fix formatting errors above!"
+		echo "Use: $(MAKE) fmt-fix target".
+		echo
+		exit 1
+	fi
+
+
+# fmt-fix
+
+fmt-fix:
+	@echo "Fixing C and eBPF files and headers formatting..."
+	$(CLANG_FMT) -i --verbose ./libbpfgo.h
 
 # output
 
