@@ -1,5 +1,5 @@
-//go:build linux
-// +build linux
+//go:build linux && apparmor
+// +build linux,apparmor
 
 package apparmor
 
@@ -10,17 +10,28 @@ package apparmor
 // #include <sys/apparmor.h>
 import "C"
 import (
-	"errors"
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/go-logr/logr"
 )
 
 const (
+	defaultPoliciesDir = "/etc/apparmor.d"
+
 	modulePath string = "/sys/module/apparmor"
+	// enabledFile is the path to the file that indicates whether apparmor is enabled.
+	enabledFile string = "/sys/module/apparmor/parameters/enabled"
+
+	// profilesPath stores the path to the file which contains all loaded profiles.
+	profilesPath string = "/sys/kernel/security/apparmor/profiles"
 )
 
 var (
@@ -28,19 +39,54 @@ var (
 	appArmorParserPath string
 )
 
-// Enforceable checks whether AppArmor is installed, enabled and that
-// policies are enforceable.
-func (a *AppArmor) Enforceable() bool {
-	return aaModuleLoaded() && aaParserInstalled()
+var goOS = func() string {
+	return runtime.GOOS
 }
 
-// DeletePolicy removes an AppArmor policy from the kernel.
-func (a *AppArmor) DeletePolicy(policyName string) error {
-	if ok, err := hasEnoughPrivileges(); !ok {
-		return err
+// NewAppArmor creates a new instance of the apparmor API.
+func NewAppArmor(opts ...AppArmorOption) aa {
+	if goOS() == "linux" {
+		o := &appArmorOpts{
+			logger: logr.Discard(),
+		}
+		o.applyOpts(opts...)
+
+		return &AppArmor{opts: o}
 	}
 
-	a.logger.V(2).Info(fmt.Sprintf("policy name: %s", policyName))
+	return &unsupported{}
+}
+
+type AppArmor struct {
+	opts *appArmorOpts
+}
+
+func (a *AppArmor) Enabled() (bool, error) {
+	f, err := os.ReadFile(enabledFile)
+	if err != nil {
+		return false, fmt.Errorf("cannot read file %s: %w", enabledFile, err)
+	}
+	if strings.Contains(string(f), "Y") {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (a *AppArmor) Enforceable() (bool, error) {
+	enabled, err := a.Enabled()
+	if err != nil {
+		return false, err
+	}
+
+	return enabled && aaParserInstalled(), nil
+}
+
+func (a *AppArmor) DeletePolicy(policyName string) error {
+	a.opts.logger.V(2).Info(fmt.Sprintf("policy name: %s", policyName))
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	var kernel_interface *C.aa_kernel_interface
 
@@ -56,22 +102,16 @@ func (a *AppArmor) DeletePolicy(policyName string) error {
 		err = fmt.Errorf("call aa_kernel_interface_remove_policy")
 	}
 	C.aa_kernel_interface_unref(kernel_interface)
-
 	return err
 }
 
-// LoadPolicy loads an AppArmor policy into the kernel.
 func (a *AppArmor) LoadPolicy(fileName string) error {
-	if ok, err := hasEnoughPrivileges(); !ok {
-		return err
-	}
-
 	parserPath := appArmorParser()
 	if len(parserPath) == 0 {
 		return fmt.Errorf("cannot find apparmor_parser")
 	}
 
-	a.logger.V(2).Info(fmt.Sprintf("policy file: %s", fileName))
+	a.opts.logger.V(2).Info(fmt.Sprintf("policy file: %s", fileName))
 	fileName, err := filepath.Abs(fileName)
 	if err != nil {
 		return fmt.Errorf("cannot get abs from file")
@@ -81,22 +121,20 @@ func (a *AppArmor) LoadPolicy(fileName string) error {
 	if err != nil {
 		return fmt.Errorf("cannot create tmp file")
 	}
-	defer func() {
-		if err := fd.Close(); err != nil {
-			a.logger.V(1).Info(fmt.Sprintf("closing file: %s", err))
-		}
-	}()
+	defer os.Remove(fd.Name())
 
 	cmd := exec.Command(parserPath, fileName, "-o", fd.Name())
-	a.logger.V(2).Info(fmt.Sprintf("transform policy into binary: %s", cmd.Args))
+	a.opts.logger.V(2).Info(fmt.Sprintf("transform policy into binary: %s", cmd.Args))
 
 	err = cmd.Run()
 	if err != nil {
 		return err
 	}
 
-	var kernel_interface *C.aa_kernel_interface
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
+	var kernel_interface *C.aa_kernel_interface
 	if C.aa_kernel_interface_new(&kernel_interface, nil, nil) != 0 {
 		return fmt.Errorf("aa_kernel_interface_new")
 	}
@@ -114,6 +152,24 @@ func (a *AppArmor) LoadPolicy(fileName string) error {
 	return err
 }
 
+func (a *AppArmor) PolicyLoaded(policyName string) (bool, error) {
+	readFile, err := os.Open(profilesPath)
+	if err != nil {
+		return false, fmt.Errorf("cannot open file %s: %w", profilesPath, err)
+	}
+
+	s := bufio.NewScanner(readFile)
+	for s.Scan() {
+		// profiles will be in the format "profile-name (mode: complain/enforce)":
+		// sample-profile (enforce)
+		if strings.HasPrefix(s.Text(), policyName+" (") {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func appArmorParser() string {
 	findAppArmorParser.Do(func() {
 		locations := []string{
@@ -128,29 +184,6 @@ func appArmorParser() string {
 		}
 	})
 	return appArmorParserPath
-}
-
-func hasEnoughPrivileges() (bool, error) {
-	euid := os.Geteuid()
-	uid := os.Getuid()
-
-	if uid == 0 && euid == 0 {
-		return true, nil
-	}
-
-	filename := filepath.Base(os.Args[0])
-	errMessage := fmt.Sprintf("%s must run as root", filename)
-	if euid == 0 {
-		return false, errors.New("setuid is not supported")
-	}
-
-	return false, errors.New(errMessage)
-}
-
-// moduleLoaded checks whether the AppArmor module is loaded into the kernel.
-func aaModuleLoaded() bool {
-	_, err := os.Stat(modulePath)
-	return err == nil
 }
 
 // aaParserInstalled checks whether apparmor_parser is installed.
